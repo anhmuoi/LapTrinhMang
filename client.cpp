@@ -1,89 +1,110 @@
-#include <stdio.h>
+#include <iostream>
 #include <WinSock2.h>
-#include <cstring>
-#include <string>
-#include <ws2tcpip.h>
+#include <WS2tcpip.h>
+#include <fstream>
+
+#pragma comment(lib, "ws2_32.lib")
+
+int main(int argc, char** argv) {
+	WSADATA wsData;
+	WORD ver = MAKEWORD(2, 2);
+
+	std::cout << argv;
+
+	if (WSAStartup(ver, &wsData) != 0) {
+		std::cerr << "Error starting winsock!" << std::endl;
+		return -1;
+	}
+
+	SOCKET clientSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+	if (clientSock == INVALID_SOCKET) {
+		std::cerr << "Error creating socket!, " << WSAGetLastError() << std::endl;
+		return -1;
+	}
+
+	//char serverAddress[NI_MAXHOST];
+	//memset(serverAddress, 0, NI_MAXHOST);
+
+	//std::cout << "Enter server address: ";
+	//std::cin.getline(serverAddress, NI_MAXHOST);
+
+	sockaddr_in hint;
+	hint.sin_family = AF_INET;
+	hint.sin_port = htons((char)argv[1]);
+	inet_pton(AF_INET, argv[0], &hint.sin_addr);
+
+	char welcomeMsg[255];
+	const int BUFFER_SIZE = 1024;
+	char bufferFile[BUFFER_SIZE];
+	char fileRequested[FILENAME_MAX];
+	std::ofstream file;
 
 
-#pragma comment(lib,"ws2_32.lib")
-#pragma warning(disable:4996)
-#pragma warning(disable:4700)
+	if (connect(clientSock, (sockaddr*)&hint, sizeof(hint)) == SOCKET_ERROR) {
+		std::cerr << "Error connect to server!, " << WSAGetLastError() << std::endl;
+		closesocket(clientSock);
+		WSACleanup();
+		return -1;
+	}
 
-int main() {
+	int byRecv = recv(clientSock, welcomeMsg, 255, 0);
+	if (byRecv == 0 || byRecv == -1) {
+		closesocket(clientSock);
+		WSACleanup();
+		return -1;
+	}
 
-	char target_ip[20] = "127.0.0.1";
+	bool clientClose = false;
+	int codeAvailable = 404;
+	const int fileAvailable = 200;
+	const int fileNotfound = 404;
+	long fileRequestedsize = 0;
+	do {
+		int fileDownloaded = 0;
+		memset(fileRequested, 0, FILENAME_MAX);
+		std::cout << "Enter file name: " << std::endl;
+		std::cin.getline(fileRequested, FILENAME_MAX);
 
-	// port 
-	unsigned short target_port = 1234;
+		byRecv = send(clientSock, "hello.txt", FILENAME_MAX, 0);
+		if (byRecv == 0 || byRecv == -1) {
+			clientClose = true;
+			break;
+		}
 
-	WSADATA wsa;
-	WSAStartup(MAKEWORD(2, 2), &wsa);
+		byRecv = recv(clientSock, (char*)&codeAvailable, sizeof(int), 0);
+		if (byRecv == 0 || byRecv == -1) {
+			clientClose = true;
+			break;
+		}
+		if (codeAvailable == 200) {
+			byRecv = recv(clientSock, (char*)&fileRequestedsize, sizeof(long), 0);
+			if (byRecv == 0 || byRecv == -1) {
+				clientClose = true;
+				break;
+			}
 
-	SOCKADDR_IN addr;
+			file.open(fileRequested, std::ios::binary | std::ios::trunc);
 
-	addr.sin_addr.s_addr = inet_addr(target_ip);
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(target_port);
+			do {
+				memset(bufferFile, 0, BUFFER_SIZE);
+				byRecv = recv(clientSock, bufferFile, BUFFER_SIZE, 0);
 
+				if (byRecv == 0 || byRecv == -1) {
+					clientClose = true;
+					break;
+				}
 
-
-	SOCKET client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-	int ret = connect(client_socket, (SOCKADDR*)&addr, sizeof(addr));
-	if (ret == SOCKET_ERROR) {
-		printf("Loi ket noi\n");
-		return 0;
-	};
-
-	char client_info[100] = "";
-
-	// get name and print name of computer
-	CHAR ComputerName[50];
-	printf("abc");
-	DWORD   size = 50;
-	printf("abc");
-	if (GetComputerNameA(ComputerName, &size)) {
-		printf("abc");
-		strcat(client_info, "Computer Name: ");
-		strcat(client_info, ComputerName);
-		strcat(client_info, "\n");
-	};
-
-	//printf("abc");
-
-	// get drive name 
-	CHAR DriveName[32];
-	if (GetLogicalDriveStringsA(256, DriveName)) {
-		strcat(client_info, "Drive Name: ");
-		strcat(client_info, DriveName);
-		strcat(client_info, "\n");
-	};
-
-	// get free space
-	LPCSTR root = "C:\\"; // root
-
-	DWORD sectorsPerCluster;
-	DWORD bytesPerSector;
-	DWORD numberOfFreeClusters;
-	DWORD totalNumberOfClusters;
-
-	if (GetDiskFreeSpaceA(root, &sectorsPerCluster, &bytesPerSector, &numberOfFreeClusters, &totalNumberOfClusters)) {
-
-		long long free_space = (long long)bytesPerSector * sectorsPerCluster * numberOfFreeClusters;
-
-		std::string s = (std::to_string(free_space));
-		const char* freespace = s.c_str();
-
-		strcat(client_info, "Free Space: ");
-		strcat(client_info, freespace);
-		strcat(client_info, " Byte\n");
-	};
-
-
-	// send 
-	send(client_socket, client_info, strlen(client_info), 0);
-
-	// close 
-	closesocket(client_socket);
+				file.write(bufferFile, byRecv);
+				fileDownloaded += byRecv;
+			} while (fileDownloaded < fileRequestedsize);
+			file.close();
+		}
+		else if (codeAvailable == 404) {
+			std::cout << "Can't open file or file not found!" << std::endl;
+		}
+	} while (!clientClose);
+	closesocket(clientSock);
 	WSACleanup();
+	return 0;
 }
