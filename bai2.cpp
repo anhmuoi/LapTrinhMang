@@ -61,7 +61,7 @@ int main() {
 			fclose(f);
 		}
 		else {
-			strcat(buf, " > C:\\Users\\CHINH.LT198209\\source\\repos\\ltm\\3\\Bai2\\out.txt");
+			strcat(buf, " > C:\\Users\\ADMIN\\source\\repos\\ltm\\3\\Bai2\\out.txt");
 
 			system(buf);
 
